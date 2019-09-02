@@ -1,5 +1,15 @@
 import numpy as np 
 
+"""
+    Dudas para preguntar:
+        - La demora del cliente se calcula desde que entra hasta que sale, o solo el tiempo en cola?
+        - Condicion de finalizacion de simulacion; como calcular el estado estacionario?
+        - TMS y TMA ya esta dividido?
+        - Utilizacion de servidores individuales o promediadas?
+        - Cantidad de clientes en cola individuales o promedidadas?
+
+"""
+
 big_number = 9999999
 
 class Cliente():
@@ -56,6 +66,7 @@ class Linea():
         self.servidores = servidores
 
 
+
 class Simulacion():
     def __init__(self):
         """
@@ -90,7 +101,7 @@ class Simulacion():
             print(self.lista_eventos)
             nro_evento = self.tiempos()
             self.eventos(nro_evento)
-            self.diagnostico()
+            self.diagnostico(nro_evento)
         self.reportes()
 
 
@@ -98,8 +109,12 @@ class Simulacion():
         """
         Avanza el reloj hasta el siguiente evento y devuelve el evento correspondiente
         """
+
+        #Obtenemos el nro de evento del evento que tiene menor tiempo proximo
         nro_evento = self.lista_eventos.index(min(self.lista_eventos))
+        #Guardamos el tiempo acutal como tiempo del ultimo evento
         self.tiempo_ultimo_evento = self.reloj
+        #Actualizamos el reloj al tiempo del proximo evento
         self.reloj = self.lista_eventos[nro_evento]
         return nro_evento
 
@@ -111,53 +126,90 @@ class Simulacion():
         Al ocurrir un evento, actualiza lista_eventos
         """
 
-                
         def arribo():
+            #Calculamos el tiempo del siguiente arribo
             self.lista_eventos[nro_evento] = self.reloj + np.random.exponential(self.lineas[0].colas_entrada.tma)
+
+            #Creamos el cliente y decidimos el servidor de la primera linea al que va a ir
             cli = Cliente(self.reloj)
             nro_servidor = self.asignar_servidor()
+
+            #Si hay un servidor vacio:
             if nro_servidor:
-                nro_servidor -= 1
+                nro_servidor -= 1 #Le restamos uno al nro_servidor para poder usarlo como indice de un arreglo, que comienza en 0
+
+                #Generamos el tiempo de la proxima partida de ese servidor
                 self.lista_eventos[nro_servidor+1] = self.reloj + np.random.exponential(self.lineas[0].servidores[nro_servidor].tms)
+                #Y realizamos el ingreso al servidor
                 self.lineas[0].servidores[nro_servidor].ingreso_servidor(cli,self.reloj)
+                
             else:
+                #Si no hay un servidor vacio, realizamos el ingreso a la cola
                 self.lineas[0].colas_entrada.ingreso_cola(cli)
 
+
+
         def partidas(s):
-            #obtenemos el nro de linea y de servidor del nombre del evento
+            #Obtenemos el nro de linea y de servidor del nombre del evento
             n_linea, n_servidor = int(s[-2])-1 ,int(s[-1])-1
+
+            #Calculamos el tiempo de la proxima partida de ese servidor
             self.lista_eventos[nro_evento] = self.reloj + np.random.exponential(self.lineas[n_linea].servidores[n_servidor].tms)
-            #partida de primera linea:
+            
+            #Si la partida es de un servidor de la primera linea:
             if n_linea == 0:
+
+                #Guardamos el servidor y el cliente que este contiene para facilitar el acceso
                 srv = self.lineas[0].servidores[n_servidor]
                 cli = srv.cliente
-                if cli:
-                    if self.lineas[1].servidores[n_servidor].cliente:
-                        #Ingresa a la cola
-                        self.lineas[1].colas_entrada[n_servidor].ingreso_cola(cli)
-                    else:
-                        self.lista_eventos[n_servidor+4] = self.reloj + np.random.exponential(self.lineas[n_linea].servidores[n_servidor].tms)
-                        self.lineas[1].servidores[n_servidor].ingreso_servidor(cli,self.reloj)
+
+                #Si el servidor en la misma fila(horizontal) de la siguiente linea(vertical) esta ocupado:
+                if self.lineas[1].servidores[n_servidor].cliente:
+                        #Realizamos el ingreso del cliente a la cola
+                    self.lineas[1].colas_entrada[n_servidor].ingreso_cola(cli)
+
+                #Sino:
                 else:
-                    pass
+                    #Generamos el tiempo de partida del servidor de la siguiente linea en el que el cliente va a ingresar
+                    self.lista_eventos[n_servidor+4] = self.reloj + np.random.exponential(self.lineas[n_linea].servidores[n_servidor].tms)
+                    #Realizamos el ingreso del cliente al servidor de la siguiente linea
+                    self.lineas[1].servidores[n_servidor].ingreso_servidor(cli,self.reloj)
+
+                #Finalmente, realizamos la salida del servidor de la primera linea
                 self.lineas[0].servidores[n_servidor].salida_servidor(self.reloj)
 
+                #Ahora, tenemos que realizar el ingreso de un cliente en la cola anterior al servidor de primera linea que acaba de quedar vacio
+
+                #Si la cola de entraada esta vacia
                 if self.lineas[0].colas_entrada.clientes == []:
+                    #El servidor permanece vacio, y seteamos el tiempo de su proxima partida en infinito
                     self.lista_eventos[n_servidor+1] = big_number
+
+                #Si hay alguien en cola:
                 else:
+                    #Realizamos su ingreso al servidor
                     self.lineas[0].servidores[n_servidor].ingreso_servidor(self.lineas[0].colas_entrada.salida_cola(), self.reloj)
 
-            elif n_linea == 1:
-                self.clientes.append(self.lineas[1].servidores[n_servidor].cliente)
-                self.lineas[1].servidores[n_servidor].cliente.salida_sistema(self.reloj)
-                self.lineas[1].servidores[n_servidor].salida_servidor(self.reloj)
 
+            #Si la partida es de un servidor de segunda linea:
+            elif n_linea == 1:
+                #Hacemos tres cosas:
+                self.clientes.append(self.lineas[1].servidores[n_servidor].cliente)         #1- Agregamos el cliente a la lista de clientes que completaron su demora
+                self.lineas[1].servidores[n_servidor].cliente.salida_sistema(self.reloj)    #2- Llamamos un metodo en Cliente que lo saca del sistema (calcula su demora)
+                self.lineas[1].servidores[n_servidor].salida_servidor(self.reloj)           #3- Realizamos la salida del servidor de segunda linea
+
+                #Al igual que en el caso anterior, el servidor queda vacio, y debemos ingresar al siguiente cliente en cola, si es que lo hay
                 if self.lineas[1].colas_entrada[n_servidor].clientes == []:
                     self.lista_eventos[n_servidor+4] = big_number
                 else:
                     self.lineas[1].servidores[n_servidor].ingreso_servidor(self.lineas[1].colas_entrada[n_servidor].salida_cola(),self.reloj)
+
         
         def actualizar_q_t():
+            """
+            Cada vez que ocurre un evento, se llama a esta funcion para calcular q(t), es decir
+            pedirle a cada una de las colas que le sume a su q(t) la cantidad de clientes que tiene multiplicado por el tiempo desde el evento anterior
+            """
             self.lineas[0].colas_entrada.calcular_q_t(self.reloj,self.tiempo_ultimo_evento)
             for cola in self.lineas[1].colas_entrada:
                 cola.calcular_q_t(self.reloj,self.tiempo_ultimo_evento)
@@ -168,7 +220,7 @@ class Simulacion():
             arribo()
         else:
             partidas(evento)
-    
+            
             
     def asignar_servidor(self):
         """
@@ -190,42 +242,57 @@ class Simulacion():
         Genera los reportes estadisticos al finalizar la simulacion
         """
         print()
-        print("="*40)
-        print()
+        #Utilizacion de servidores:
         utilizacion_servidores = []
+        #Para cada servidor de cada linea
         for l in self.lineas:
             for s in l.servidores:
+                #Calculamos la utilizacion como el tiempo acumulado en el que el servidor trabajo dividido el tiempo final
                 utilizacion_servidores.append(s.tiempo_servicio_acumulado/self.reloj)
 
+
+        #Demora de clientes
         demora_clientes = []
+        #Para cada cliente que cumplio su demora, obtenemos la demora
         for cli in self.clientes:
             demora_clientes.append(cli.demora)
+        #Obtenemos el promedio de esas demoras
+        promedio_demora_clientes = np.average(demora_clientes)
 
+
+        #Cantidad promedio de clientes en cola:
+        #Calculamos la cant promedio de c en cola de entrada:
         promedio_clientes_cola_l1 = self.lineas[0].colas_entrada.q_t / self.reloj
+        #Y para las tres colas de la siguiente linea
         promedio_clientes_cola_l2 = [(c.q_t/self.reloj) for c in self.lineas[1].colas_entrada]
-        
-        p_ut = np.average(utilizacion_servidores)
-        p_dm = np.average(demora_clientes)
-        pcc1 = promedio_clientes_cola_l1
-        pcc2 = np.average(promedio_clientes_cola_l2)
 
-        print(p_dm)
-        print("Prom clientes en cola de entrada: ",pcc1)
+        print("Demora promedio de clientes: ",promedio_demora_clientes)
+        print("Prom clientes en cola de entrada: ",promedio_clientes_cola_l1)
         print("Prom clientes en cola l2: ",promedio_clientes_cola_l2)
-        print(utilizacion_servidores)
-        #print(p_ut,"\n",p_dm,"\n",pcc1,"\n",pcc2)
+        print("Utlizacion de los servidores: ",utilizacion_servidores)
 
-    def diagnostico(self):
+
+    def diagnostico(self,nro_evento):
+        """
+        En cada iteracion imprime el estado del sistema
+        """
+        print("Evento: ",self.nombres_eventos[nro_evento])
+        print("="*60)
+        print()
+        print("Reloj: ",self.reloj)
         print("Cola entrada: ", len(self.lineas[0].colas_entrada.clientes))
         print("Servidor 0,0: ", self.lineas[0].servidores[0].cliente)
         print("Servidor 0,1: ", self.lineas[0].servidores[1].cliente)
         print("Servidor 0,2: ", self.lineas[0].servidores[2].cliente)
         print("Cola 0: ", len(self.lineas[1].colas_entrada[0].clientes))
-        print("Servidor 1,0: ", self.lineas[1].servidores[0].cliente)
         print("Cola 1: ", len(self.lineas[1].colas_entrada[1].clientes))
-        print("Servidor 1,1: ", self.lineas[1].servidores[1].cliente)
         print("Cola 2: ", len(self.lineas[1].colas_entrada[2].clientes))
+        print("Servidor 1,0: ", self.lineas[1].servidores[0].cliente)
+        print("Servidor 1,1: ", self.lineas[1].servidores[1].cliente)
         print("Servidor 1,2: ", self.lineas[1].servidores[2].cliente)
+        print()
+        print("="*60)
+        print()
 
 
 sim = Simulacion()
