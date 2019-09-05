@@ -1,24 +1,20 @@
 import numpy as np 
-
-"""
-    Dudas para preguntar:
-        - La demora del cliente se calcula desde que entra hasta que sale, o solo el tiempo en cola?
-        - Condicion de finalizacion de simulacion; como calcular el estado estacionario?
-        - TMS y TMA ya esta dividido?
-        - Utilizacion de servidores individuales o promediadas?
-        - Cantidad de clientes en cola individuales o promedidadas?
-
-"""
-
 big_number = 9999999
 
 class Cliente():
-    def __init__(self,t_entrada):
+    def __init__(self,t_entrada,prioridad):
         self.demora = 0
         self.t_entrada = t_entrada
+        self.prioridad = prioridad
 
     def salida_sistema(self,reloj):
         self.demora = reloj - self.t_entrada
+
+    def __str__(self):
+        if self.prioridad:
+            return("Cliente prioritario")
+        else:
+            return("Cliente")
 
 
 class Servidor():
@@ -38,9 +34,10 @@ class Servidor():
 
 
 class Cola():
-    def __init__(self,clientes):
+    def __init__(self,clientes,alg):
         self.clientes = clientes
         self.cantidad_clientes = 0
+        self.algoritmo = alg
         self.q_t = 0
     
     def calcular_q_t(self,reloj,tue):
@@ -51,12 +48,17 @@ class Cola():
 
     def salida_cola(self):
         self.cantidad_clientes += 1
-        return self.clientes.pop()
+
+        if self.algoritmo == "FIFO":
+            return self.clientes.pop()
+
+        elif self.algoritmo == "LIFO":
+            return self.clientes.pop(0)
 
 
 class Cola_Inicial(Cola):
-    def __init__(self,clientes,tma):
-        Cola.__init__(self,clientes)
+    def __init__(self,clientes,tma,alg):
+        Cola.__init__(self,clientes,alg)
         self.tma = tma
 
 
@@ -68,7 +70,7 @@ class Linea():
 
 
 class Simulacion():
-    def __init__(self):
+    def __init__(self,alg_colas,prioridades):
         """
         Establece la topologia de la simulacion
         Inicializa la simulacion en t = 0
@@ -79,10 +81,11 @@ class Simulacion():
         self.nombres_eventos = ["Arribo", "Partida11", "Partida12", "Partida13", "Partida21", "Partida22", "Partida23"]
         self.clientes = []
         self.tiempo_ultimo_evento = 0
+        self.prioridades = prioridades
 
         #creamos la topologia de la simulacion, estableciendo las lineas, servidores, y colas
-        l1 = Linea(Cola_Inicial([],0.8), [Servidor(0.5),Servidor(0.5),Servidor(0.5)])
-        l2 = Linea([Cola([]),Cola([]),Cola([])], [Servidor(0.2),Servidor(0.4),Servidor(0.6)])
+        l1 = Linea(Cola_Inicial([],0.8,alg_colas), [Servidor(0.5),Servidor(0.5),Servidor(0.5)])
+        l2 = Linea([Cola([],alg_colas),Cola([],alg_colas),Cola([],alg_colas)], [Servidor(0.2),Servidor(0.4),Servidor(0.6)])
         self.lineas = [l1,l2]
 
         #Creamos la lista de eventos, estableciendo todas las partidas en big_number para evitar partidas de servidores desocupados
@@ -97,7 +100,7 @@ class Simulacion():
         Llama a las subrutinas de la simulacion
         E itera hasta que se cumplen las condiciones de finalizacion
         """
-        while(self.reloj<50):
+        while(self.reloj<2000):
             print(self.lista_eventos)
             nro_evento = self.tiempos()
             self.eventos(nro_evento)
@@ -131,7 +134,7 @@ class Simulacion():
             self.lista_eventos[nro_evento] = self.reloj + np.random.exponential(self.lineas[0].colas_entrada.tma)
 
             #Creamos el cliente y decidimos el servidor de la primera linea al que va a ir
-            cli = Cliente(self.reloj)
+            cli = Cliente(self.reloj, (np.random.random() < self.prioridades))
             nro_servidor = self.asignar_servidor()
 
             #Si hay un servidor vacio:
@@ -248,7 +251,7 @@ class Simulacion():
         for l in self.lineas:
             for s in l.servidores:
                 #Calculamos la utilizacion como el tiempo acumulado en el que el servidor trabajo dividido el tiempo final
-                utilizacion_servidores.append(s.tiempo_servicio_acumulado/self.reloj)
+                utilizacion_servidores.append(round(s.tiempo_servicio_acumulado/self.reloj,5))
 
 
         #Demora de clientes
@@ -257,26 +260,34 @@ class Simulacion():
         for cli in self.clientes:
             demora_clientes.append(cli.demora)
         #Obtenemos el promedio de esas demoras
-        promedio_demora_clientes = np.average(demora_clientes)
+        promedio_demora_clientes = round(np.average(demora_clientes),5)
 
 
         #Cantidad promedio de clientes en cola:
         #Calculamos la cant promedio de c en cola de entrada:
-        promedio_clientes_cola_l1 = self.lineas[0].colas_entrada.q_t / self.reloj
+        promedio_clientes_cola_l1 = round(self.lineas[0].colas_entrada.q_t / self.reloj,5)
         #Y para las tres colas de la siguiente linea
-        promedio_clientes_cola_l2 = [(c.q_t/self.reloj) for c in self.lineas[1].colas_entrada]
+        promedio_clientes_cola_l2 = [(round(c.q_t/self.reloj,5)) for c in self.lineas[1].colas_entrada]
+
+        clientes_prioritarios = 0
+        for c in self.clientes:
+            if c.prioridad:
+                clientes_prioritarios+=1
+        clientes_prioritarios=round(clientes_prioritarios/len(self.clientes),5)
+
 
         print("Demora promedio de clientes: ",promedio_demora_clientes)
         print("Prom clientes en cola de entrada: ",promedio_clientes_cola_l1)
         print("Prom clientes en cola l2: ",promedio_clientes_cola_l2)
         print("Utlizacion de los servidores: ",utilizacion_servidores)
+        print("Proporcion de clientes prioritarios: ",clientes_prioritarios)
 
 
     def diagnostico(self,nro_evento):
         """
         En cada iteracion imprime el estado del sistema
         """
-        print("Evento: ",self.nombres_eventos[nro_evento])
+        print("Evento: ",self.nombres_eventos[nro_evento],"\n")
         print("="*60)
         print()
         print("Reloj: ",self.reloj)
@@ -295,5 +306,5 @@ class Simulacion():
         print()
 
 
-sim = Simulacion()
+sim = Simulacion(alg_colas = "FIFO", prioridades = 0.03)
 sim.programa_principal()
