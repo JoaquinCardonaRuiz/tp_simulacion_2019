@@ -1,4 +1,5 @@
 import numpy as np 
+import matplotlib.pyplot as plt
 big_number = 9999999
 
 class Cliente():
@@ -94,18 +95,29 @@ class Simulacion():
         for _ in self.nombres_eventos[1:]:
             self.lista_eventos.append(big_number)
 
+        #Estadisticos
+        self.promedio_demora_clientes = []
+        self.utilizacion_servidores = []
+        self.promedio_clientes_cola = []
+
 
     def programa_principal(self):
         """
         Llama a las subrutinas de la simulacion
         E itera hasta que se cumplen las condiciones de finalizacion
         """
-        while(self.reloj<2000):
-            print(self.lista_eventos)
+        v=False
+        while(self.reloj<500):
+            if v:print(self.lista_eventos)
             nro_evento = self.tiempos()
             self.eventos(nro_evento)
-            self.diagnostico(nro_evento)
+            if v: self.diagnostico(nro_evento)
+            self.estadisticos()
         self.reportes()
+        
+        return [self.promedio_demora_clientes,
+                self.utilizacion_servidores,
+                self.promedio_clientes_cola]
 
 
     def tiempos(self):
@@ -240,6 +252,22 @@ class Simulacion():
         return False
 
 
+    def estadisticos(self):
+        us = []
+        for l in self.lineas:
+            for s in l.servidores:
+                us.append(round(s.tiempo_servicio_acumulado/self.reloj,5))
+        self.utilizacion_servidores.append(us)
+
+        d = []
+        for cli in self.clientes:
+            d.append(cli.demora)
+        self.promedio_demora_clientes.append(round(np.average(d),5))
+        self.promedio_clientes_cola.append([round(self.lineas[0].colas_entrada.q_t / self.reloj,5)]+[(round(c.q_t/self.reloj,5)) for c in self.lineas[1].colas_entrada])
+
+
+
+
     def reportes(self):
         """
         Genera los reportes estadisticos al finalizar la simulacion
@@ -306,5 +334,39 @@ class Simulacion():
         print()
 
 
-sim = Simulacion(alg_colas = "FIFO", prioridades = 0.03)
-sim.programa_principal()
+def corridas(alg_colas="FIFO",prioridades=0):
+    #TODO: agregar el tiempo del evento para plotear xticks
+    #Demora clientes
+    r = []
+    for i in range(3):
+        sim = Simulacion(alg_colas,prioridades)
+        r.append(sim.programa_principal())
+    colors = ["#602159","#4a8189","#4bf4ae"]
+    for corrida in r:
+        plt.plot(corrida[0],color = colors.pop(0),linewidth=1.75)
+    plt.title("Demora promedio de clientes")
+    plt.xticks(list(range(len(corrida[0])))[::100],[int(i*(500/len(corrida[0]))) for i in list(range(len(corrida[0])))[::100]])
+    plt.xlabel("Reloj")
+    plt.ylabel("Horas")
+    plt.show()
+
+    #Utilizacion Servidores
+    for servidor in [0,1,2,3,4,5]:
+        colors = ["#602159","#4a8189","#4bf4ae"]
+        for corrida in r:
+            plt.plot([i[servidor] for i in corrida[1]],color = colors.pop(0))
+        plt.title("Utilizacion del servidor "+str(servidor))
+        plt.show()
+
+    #Promedio clientes en cola:
+    for cola in [0,1,2,3]:
+        colors = ["#602159","#4a8189","#4bf4ae"]
+        for corrida in r:
+            plt.plot([i[cola] for i in corrida[2]],color = colors.pop(0))
+        plt.title("Promedio de clientes en cola "+str(cola))
+        plt.show()
+
+
+corridas()
+#sim = Simulacion(alg_colas = "FIFO", prioridades = 0.03)
+#sim.programa_principal()
