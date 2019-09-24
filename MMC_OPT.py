@@ -4,19 +4,19 @@ from matplotlib.patches import Patch
 big_number = 9999999
 
 class Cliente():
-    def __init__(self,t_entrada,prioridad):
+    def __init__(self,t_entrada):
         self.demora = 0
         self.t_entrada = t_entrada
-        self.prioridad = prioridad
+        self.prioridad = 0
 
     def salida_sistema(self,reloj):
         self.demora = reloj - self.t_entrada
 
     def __str__(self):
-        if self.prioridad:
-            return("Cliente prioritario")
-        else:
-            return("Cliente")
+        return("Cliente: "+str(self.prioridad))
+
+    def __repr__(self):
+        return("Cliente: "+str(self.prioridad))
 
 
 class Servidor():
@@ -36,43 +36,34 @@ class Servidor():
 
 
 class Cola():
-    def __init__(self,clientes,alg):
+    def __init__(self,clientes):
         self.clientes = clientes
         self.cantidad_clientes = 0
-        self.algoritmo = alg
         self.q_t = 0
     
     def calcular_q_t(self,reloj,tue):
         self.q_t += len(self.clientes) * (reloj - tue)
 
-    def ingreso_cola(self,cliente):    
+    def ingreso_cola(self,cliente,reloj):
+        cliente.prioridad = reloj - cliente.t_entrada    
         self.clientes.append(cliente)
 
     def salida_cola(self):
-        self.cantidad_clientes += 1
-        if any([i.prioridad for i in self.clientes]):
-            if self.algoritmo == "FIFO":
-                aux = self.clientes
-            elif self.algoritmo == "LIFO":
-                aux = self.clientes[::-1]
-
-            for c in aux:
-                if c.prioridad:
-                    cli = c
-                    self.clientes.remove(cli)
-                    break
-            return cli
-
-        if self.algoritmo == "FIFO":
-            return self.clientes.pop(0)
-
-        elif self.algoritmo == "LIFO":
-            return self.clientes.pop()
-
+        index = 0
+        i = 0
+        mx = 0
+        for c in self.clientes:
+            if c.prioridad > mx:
+                mx = c.prioridad
+                index = i
+            i+=1
+        cli = self.clientes[index]
+        self.clientes.remove(cli)
+        return cli
 
 class Cola_Inicial(Cola):
-    def __init__(self,clientes,tma,alg):
-        Cola.__init__(self,clientes,alg)
+    def __init__(self,clientes,tma):
+        Cola.__init__(self,clientes)
         self.tma = tma
 
 
@@ -84,7 +75,7 @@ class Linea():
 
 
 class Simulacion():
-    def __init__(self,alg_colas,prioridades):
+    def __init__(self):
         """
         Establece la topologia de la simulacion
         Inicializa la simulacion en t = 0
@@ -95,11 +86,10 @@ class Simulacion():
         self.nombres_eventos = ["Arribo", "Partida11", "Partida12", "Partida13", "Partida21", "Partida22", "Partida23"]
         self.clientes = []
         self.tiempo_ultimo_evento = 0
-        self.prioridades = prioridades
 
         #creamos la topologia de la simulacion, estableciendo las lineas, servidores, y colas
-        l1 = Linea(Cola_Inicial([],0.8,alg_colas), [Servidor(0.5),Servidor(0.5),Servidor(0.5)])
-        l2 = Linea([Cola([],alg_colas),Cola([],alg_colas),Cola([],alg_colas)], [Servidor(0.2),Servidor(0.4),Servidor(0.6)])
+        l1 = Linea(Cola_Inicial([],0.8), [Servidor(0.5),Servidor(0.5),Servidor(0.5)])
+        l2 = Linea(Cola([]), [Servidor(0.2),Servidor(0.4),Servidor(0.5)])
         self.lineas = [l1,l2]
 
         #Creamos la lista de eventos, estableciendo todas las partidas en big_number para evitar partidas de servidores desocupados
@@ -161,8 +151,8 @@ class Simulacion():
             self.lista_eventos[nro_evento] = self.reloj + np.random.exponential(self.lineas[0].colas_entrada.tma)
 
             #Creamos el cliente y decidimos el servidor de la primera linea al que va a ir
-            cli = Cliente(self.reloj, (np.random.random() < self.prioridades))
-            nro_servidor = self.asignar_servidor()
+            cli = Cliente(self.reloj)
+            nro_servidor = self.asignar_servidor(0)
 
             #Si hay un servidor vacio:
             if nro_servidor:
@@ -175,7 +165,7 @@ class Simulacion():
                 
             else:
                 #Si no hay un servidor vacio, realizamos el ingreso a la cola
-                self.lineas[0].colas_entrada.ingreso_cola(cli)
+                self.lineas[0].colas_entrada.ingreso_cola(cli,self.reloj)
 
 
 
@@ -188,24 +178,19 @@ class Simulacion():
             
             #Si la partida es de un servidor de la primera linea:
             if n_linea == 0:
-
                 #Guardamos el servidor y el cliente que este contiene para facilitar el acceso
-                srv = self.lineas[0].servidores[n_servidor]
-                cli = srv.cliente
+                cli = self.lineas[0].servidores[n_servidor].cliente
+                nro_servidor = self.asignar_servidor(1)
 
-                #Si el servidor en la misma fila(horizontal) de la siguiente linea(vertical) esta ocupado:
-                if self.lineas[1].servidores[n_servidor].cliente:
-                        #Realizamos el ingreso del cliente a la cola
-                    self.lineas[1].colas_entrada[n_servidor].ingreso_cola(cli)
-
-                #Sino:
+                if nro_servidor:
+                    nro_servidor -= 1 #Le restamos uno al nro_servidor para poder usarlo como indice de un arreglo, que comienza en 0
+                    #Generamos el tiempo de la proxima partida de ese servidor
+                    self.lista_eventos[nro_servidor+4] = self.reloj + np.random.exponential(self.lineas[1].servidores[nro_servidor].tms)
+                    #Y realizamos el ingreso al servidor
+                    self.lineas[1].servidores[nro_servidor].ingreso_servidor(cli,self.reloj)
                 else:
-                    #Generamos el tiempo de partida del servidor de la siguiente linea en el que el cliente va a ingresar
-                    self.lista_eventos[n_servidor+4] = self.reloj + np.random.exponential(self.lineas[n_linea].servidores[n_servidor].tms)
-                    #Realizamos el ingreso del cliente al servidor de la siguiente linea
-                    self.lineas[1].servidores[n_servidor].ingreso_servidor(cli,self.reloj)
-
-                #Finalmente, realizamos la salida del servidor de la primera linea
+                    #Realizamos el ingreso del cliente a la cola
+                    self.lineas[1].colas_entrada.ingreso_cola(cli,self.reloj)
                 self.lineas[0].servidores[n_servidor].salida_servidor(self.reloj)
 
                 #Ahora, tenemos que realizar el ingreso de un cliente en la cola anterior al servidor de primera linea que acaba de quedar vacio
@@ -229,10 +214,10 @@ class Simulacion():
                 self.lineas[1].servidores[n_servidor].salida_servidor(self.reloj)           #3- Realizamos la salida del servidor de segunda linea
 
                 #Al igual que en el caso anterior, el servidor queda vacio, y debemos ingresar al siguiente cliente en cola, si es que lo hay
-                if self.lineas[1].colas_entrada[n_servidor].clientes == []:
+                if self.lineas[1].colas_entrada.clientes == []:
                     self.lista_eventos[n_servidor+4] = big_number
                 else:
-                    self.lineas[1].servidores[n_servidor].ingreso_servidor(self.lineas[1].colas_entrada[n_servidor].salida_cola(),self.reloj)
+                    self.lineas[1].servidores[n_servidor].ingreso_servidor(self.lineas[1].colas_entrada.salida_cola(),self.reloj)
 
         
         def actualizar_q_t():
@@ -241,8 +226,7 @@ class Simulacion():
             pedirle a cada una de las colas que le sume a su q(t) la cantidad de clientes que tiene multiplicado por el tiempo desde el evento anterior
             """
             self.lineas[0].colas_entrada.calcular_q_t(self.reloj,self.tiempo_ultimo_evento)
-            for cola in self.lineas[1].colas_entrada:
-                cola.calcular_q_t(self.reloj,self.tiempo_ultimo_evento)
+            self.lineas[1].colas_entrada.calcular_q_t(self.reloj,self.tiempo_ultimo_evento)
 
         actualizar_q_t()
         evento = self.nombres_eventos[nro_evento]   
@@ -252,7 +236,7 @@ class Simulacion():
             partidas(evento)
             
             
-    def asignar_servidor(self):
+    def asignar_servidor(self,linea):
         """
         Establece una lista de prioridades para comprobar la disponibilidad de los servidores
         de la primer linea y asigna el servidor correspondiente
@@ -262,7 +246,7 @@ class Simulacion():
         servidores = [1,2,3]
         np.random.shuffle(servidores)
         for nro_servidor in servidores:
-            if not self.lineas[0].servidores[nro_servidor-1].cliente:
+            if not self.lineas[linea].servidores[nro_servidor-1].cliente:
                 return nro_servidor
         return False
 
@@ -278,7 +262,7 @@ class Simulacion():
         for cli in self.clientes:
             d.append(cli.demora)
         self.promedio_demora_clientes.append(round(np.average(d),5))
-        self.promedio_clientes_cola.append([round(self.lineas[0].colas_entrada.q_t / self.reloj,5)]+[(round(c.q_t/self.reloj,5)) for c in self.lineas[1].colas_entrada])
+        self.promedio_clientes_cola.append([round(self.lineas[0].colas_entrada.q_t / self.reloj,5), round(self.lineas[1].colas_entrada.q_t / self.reloj,5)])
         self.historial_reloj.append(self.reloj)
 
 
@@ -306,10 +290,8 @@ class Simulacion():
 
 
         #Cantidad promedio de clientes en cola:
-        #Calculamos la cant promedio de c en cola de entrada:
-        promedio_clientes_cola_l1 = round(self.lineas[0].colas_entrada.q_t / self.reloj,5)
-        #Y para las tres colas de la siguiente linea
-        promedio_clientes_cola_l2 = [(round(c.q_t/self.reloj,5)) for c in self.lineas[1].colas_entrada]
+        #Calculamos la cant promedio de c en cola:
+        promedio_clientes_cola = [round(self.lineas[0].colas_entrada.q_t / self.reloj,5),round(self.lineas[1].colas_entrada.q_t / self.reloj,5)]
 
         clientes_prioritarios = 0
         for c in self.clientes:
@@ -319,8 +301,7 @@ class Simulacion():
 
 
         print("Demora promedio de clientes: ",promedio_demora_clientes)
-        print("Prom clientes en cola de entrada: ",promedio_clientes_cola_l1)
-        print("Prom clientes en cola l2: ",promedio_clientes_cola_l2)
+        print("Prom clientes en colas: ",promedio_clientes_cola)
         print("Utlizacion de los servidores: ",utilizacion_servidores)
         print("Proporcion de clientes prioritarios: ",clientes_prioritarios)
 
@@ -333,13 +314,11 @@ class Simulacion():
         print("="*60)
         print()
         print("Reloj: ",self.reloj)
-        print("Cola entrada: ", len(self.lineas[0].colas_entrada.clientes))
+        print("Cola entrada: ", self.lineas[0].colas_entrada.clientes)
         print("Servidor 0,0: ", self.lineas[0].servidores[0].cliente)
         print("Servidor 0,1: ", self.lineas[0].servidores[1].cliente)
         print("Servidor 0,2: ", self.lineas[0].servidores[2].cliente)
-        print("Cola 0: ", len(self.lineas[1].colas_entrada[0].clientes))
-        print("Cola 1: ", len(self.lineas[1].colas_entrada[1].clientes))
-        print("Cola 2: ", len(self.lineas[1].colas_entrada[2].clientes))
+        print("Cola l2: ", self.lineas[1].colas_entrada.clientes)
         print("Servidor 1,0: ", self.lineas[1].servidores[0].cliente)
         print("Servidor 1,1: ", self.lineas[1].servidores[1].cliente)
         print("Servidor 1,2: ", self.lineas[1].servidores[2].cliente)
@@ -348,20 +327,19 @@ class Simulacion():
         print()
 
 
-def corridas(alg_colas="FIFO",prioridades=0):
+def corridas():
     #TODO: agregar el tiempo del evento para plotear xticks
     #Demora clientes
     
     r = []
     for i in range(3):
-        sim = Simulacion(alg_colas,prioridades)
+        sim = Simulacion()
         r.append(sim.programa_principal())
     colors = ["#543864","#8b4367","#ff6464"]
 
     for corrida in r:
         plt.plot(corrida[3],corrida[0],color = colors.pop(0),linewidth=1.75)
     plt.title("Demora promedio de clientes")
-    #plt.xticks(list(range(len(corrida[0])))[::100],[int(i*(500/len(corrida[0]))) for i in list(range(len(corrida[0])))[::100]])
     plt.xlabel("Reloj")
     plt.ylabel("Horas")
     plt.legend(handles = [Patch(facecolor=i[0], edgecolor=i[0],label=i[1]) for i in list(zip(["#543864","#8b4367","#ff6464"],["Corrida 1","Corrida 2","Corrida 3"]))])
@@ -375,15 +353,15 @@ def corridas(alg_colas="FIFO",prioridades=0):
         plt.title("Utilizacion del servidor "+str(servidor))
         plt.legend(handles = [Patch(facecolor=i[0], edgecolor=i[0],label=i[1]) for i in list(zip(["#543864","#8b4367","#ff6464"],["Corrida 1","Corrida 2","Corrida 3"]))])
         plt.show()
-    
+
     #Promedio clientes en cola:
-    for cola in [0,1,2,3]:
+    for cola in [0,1]:
         colors = ["#543864","#8b4367","#ff6464"]
         for corrida in r:
             plt.plot(corrida[3],[i[cola] for i in corrida[2]],color = colors.pop(0))
         plt.title("Promedio de clientes en cola "+str(cola))
         plt.legend(handles = [Patch(facecolor=i[0], edgecolor=i[0],label=i[1]) for i in list(zip(["#543864","#8b4367","#ff6464"],["Corrida 1","Corrida 2","Corrida 3"]))])
         plt.show()
-    
 
-corridas(alg_colas="FIFO",prioridades=0.03)
+
+corridas()
